@@ -18,6 +18,7 @@ online_connected = False
 online_player_number = None
 online_room_id = None
 online_starter = None
+online_can_choose = False
 rematch_request_from = None
 
 
@@ -1112,25 +1113,33 @@ online_result_label.pack(pady=30)
 
 def choose_online(choice):
 
+    global online_can_choose
+
     if not online_connected:
         return
 
-    if online_starter is not None:
+    # Only allow the player to choose
+    # when the server has given them permission.
 
-        if online_player_number != online_starter:
+    if not online_can_choose:
 
-            online_result_label.config(
-                text="WAIT FOR YOUR TURN",
-                fg=YELLOW
-            )
+        online_result_label.config(
+            text="WAIT FOR YOUR TURN",
+            fg=YELLOW
+        )
 
-            return
+        return
 
     try:
 
         network_client.send(
             f"CHOICE:{choice}"
         )
+
+        # Choice has now been submitted.
+        # Keep it hidden until both players choose.
+
+        online_can_choose = False
 
         online_result_label.config(
             text=(
@@ -1184,6 +1193,8 @@ tk.Button(
 
 def request_rematch():
 
+    global online_can_choose
+
     if not online_connected:
         return
 
@@ -1192,6 +1203,8 @@ def request_rematch():
         network_client.send(
             "REMATCH_REQUEST"
         )
+
+        online_can_choose = False
 
         online_result_label.config(
             text=(
@@ -1325,6 +1338,7 @@ def handle_online_message(message):
     global online_player_number
     global online_room_id
     global online_starter
+    global online_can_choose
     global rematch_request_from
 
     print("SERVER:", message)
@@ -1347,6 +1361,7 @@ def handle_online_message(message):
             fg=TEXT
         )
 
+
     # =========================
     # JOINED
     # =========================
@@ -1358,6 +1373,7 @@ def handle_online_message(message):
         online_status_label.config(
             text="Joined room. Waiting for host..."
         )
+
 
     # =========================
     # PLAYER 2 JOINED
@@ -1376,6 +1392,7 @@ def handle_online_message(message):
 
             show_online_mode()
 
+
     # =========================
     # MODE SET
     # =========================
@@ -1383,6 +1400,8 @@ def handle_online_message(message):
     elif message.startswith("MODE_SET:"):
 
         mode = message.split(":")[1]
+
+        online_can_choose = False
 
         online_score_label.config(
             text="You: 0   |   Opponent: 0"
@@ -1398,6 +1417,7 @@ def handle_online_message(message):
 
         show_online_game()
 
+
     # =========================
     # TURN
     # =========================
@@ -1410,6 +1430,10 @@ def handle_online_message(message):
 
         if online_player_number == online_starter:
 
+            # Starter gets the first choice.
+
+            online_can_choose = True
+
             online_result_label.config(
                 text=(
                     "YOU START THIS ROUND\n\n"
@@ -1419,6 +1443,11 @@ def handle_online_message(message):
             )
 
         else:
+
+            # Other player must wait until
+            # the starter submits.
+
+            online_can_choose = False
 
             online_result_label.config(
                 text=(
@@ -1430,11 +1459,53 @@ def handle_online_message(message):
 
         show_online_game()
 
+
+    # =========================
+    # YOUR TURN
+    # =========================
+
+    elif message == "YOUR_TURN":
+
+        # Starter has already chosen.
+        # Now the second player gets to choose.
+
+        online_can_choose = True
+
+        online_result_label.config(
+            text=(
+                "YOUR TURN\n\n"
+                "Choose your move"
+            ),
+            fg=GREEN
+        )
+
+        show_online_game()
+
+
+    # =========================
+    # WAITING FOR OPPONENT CHOICE
+    # =========================
+
+    elif message == "WAITING_FOR_OPPONENT_CHOICE":
+
+        online_can_choose = False
+
+        online_result_label.config(
+            text=(
+                "Your choice is hidden.\n\n"
+                "Waiting for opponent..."
+            ),
+            fg=TEXT
+        )
+
+
     # =========================
     # REMATCH START
     # =========================
 
     elif message == "REMATCH_START":
+
+        online_can_choose = False
 
         online_score_label.config(
             text="You: 0   |   Opponent: 0"
@@ -1453,6 +1524,7 @@ def handle_online_message(message):
 
         show_online_game()
 
+
     # =========================
     # REMATCH REQUESTED
     # =========================
@@ -1462,6 +1534,8 @@ def handle_online_message(message):
         rematch_request_from = int(
             message.split(":")[1]
         )
+
+        online_can_choose = False
 
         show_online_game()
 
@@ -1481,11 +1555,14 @@ def handle_online_message(message):
             pady=10
         )
 
+
     # =========================
     # REMATCH WAITING
     # =========================
 
     elif message == "REMATCH_WAITING":
+
+        online_can_choose = False
 
         rematch_button.config(
             state="disabled"
@@ -1499,11 +1576,14 @@ def handle_online_message(message):
             fg=YELLOW
         )
 
+
     # =========================
     # REMATCH DECLINED
     # =========================
 
     elif message == "REMATCH_DECLINED":
+
+        online_can_choose = False
 
         rematch_response_frame.pack_forget()
 
@@ -1515,6 +1595,7 @@ def handle_online_message(message):
             text="Rematch declined.",
             fg=RED
         )
+
 
     # =========================
     # REMATCH ALREADY REQUESTED
@@ -1530,11 +1611,17 @@ def handle_online_message(message):
             fg=YELLOW
         )
 
+
     # =========================
     # RESULT
     # =========================
 
     elif message.startswith("RESULT:"):
+
+        # Nobody can choose while the result
+        # is being displayed.
+
+        online_can_choose = False
 
         parts = message.split(":")
 
@@ -1565,12 +1652,14 @@ def handle_online_message(message):
                 my_score = score2
                 opponent_score = score1
 
+
             online_score_label.config(
                 text=(
                     f"You: {my_score}   |   "
                     f"Opponent: {opponent_score}"
                 )
             )
+
 
             # =========================
             # ROUND RESULT
@@ -1581,9 +1670,17 @@ def handle_online_message(message):
                 round_text = "DRAW!"
 
             elif (
-                (online_player_number == 1 and result == "Player1")
+                (
+                    online_player_number == 1
+                    and
+                    result == "Player1"
+                )
                 or
-                (online_player_number == 2 and result == "Player2")
+                (
+                    online_player_number == 2
+                    and
+                    result == "Player2"
+                )
             ):
 
                 round_text = "YOU WON THIS ROUND!"
@@ -1592,11 +1689,13 @@ def handle_online_message(message):
 
                 round_text = "YOU LOST THIS ROUND!"
 
+
             text = (
                 f"You chose: {my_choice}\n"
                 f"Opponent chose: {opponent_choice}\n\n"
                 f"{round_text}"
             )
+
 
             # =========================
             # MATCH OVER
@@ -1654,11 +1753,14 @@ def handle_online_message(message):
                     fg=TEXT
                 )
 
+
     # =========================
     # WAITING FOR TURN
     # =========================
 
     elif message == "WAITING_FOR_TURN":
+
+        online_can_choose = False
 
         online_result_label.config(
             text=(
@@ -1668,11 +1770,14 @@ def handle_online_message(message):
             fg=YELLOW
         )
 
+
     # =========================
     # ALREADY CHOSEN
     # =========================
 
     elif message == "ALREADY_CHOSEN":
+
+        online_can_choose = False
 
         online_result_label.config(
             text=(
@@ -1682,22 +1787,28 @@ def handle_online_message(message):
             fg=YELLOW
         )
 
+
     # =========================
     # WAITING FOR PLAYER
     # =========================
 
     elif message == "WAITING_FOR_PLAYER":
 
+        online_can_choose = False
+
         online_result_label.config(
             text="Waiting for Player 2...",
             fg=YELLOW
         )
+
 
     # =========================
     # MATCH OVER
     # =========================
 
     elif message == "MATCH_OVER":
+
+        online_can_choose = False
 
         online_result_label.config(
             text=(
@@ -1711,6 +1822,7 @@ def handle_online_message(message):
             state="normal"
         )
 
+
     # =========================
     # INVALID CHOICE
     # =========================
@@ -1721,6 +1833,7 @@ def handle_online_message(message):
             text="Invalid choice!",
             fg=RED
         )
+
 
     # =========================
     # ROOM NOT FOUND
@@ -1733,6 +1846,7 @@ def handle_online_message(message):
             fg=RED
         )
 
+
     # =========================
     # ROOM FULL
     # =========================
@@ -1744,11 +1858,14 @@ def handle_online_message(message):
             fg=RED
         )
 
+
     # =========================
     # PLAYER DISCONNECTED
     # =========================
 
     elif message == "PLAYER_DISCONNECTED":
+
+        online_can_choose = False
 
         online_result_label.config(
             text="Opponent disconnected.",
