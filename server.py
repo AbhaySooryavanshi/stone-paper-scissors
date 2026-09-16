@@ -11,6 +11,10 @@ import websockets
 rooms = {}
 
 
+# ============================================================
+# ROOM ID
+# ============================================================
+
 def create_room_id():
 
     while True:
@@ -53,30 +57,51 @@ def get_result(choice1, choice2):
 
 async def send_to_players(room, message):
 
-    if room["player1"] is not None:
+    players = [
+        room["player1"],
+        room["player2"]
+    ]
 
-        try:
+    for player in players:
 
-            await room["player1"].send(message)
+        if player is not None:
 
-        except:
+            try:
 
-            pass
+                await player.send(message)
 
+            except:
 
-    if room["player2"] is not None:
-
-        try:
-
-            await room["player2"].send(message)
-
-        except:
-
-            pass
+                pass
 
 
 # ============================================================
-# SERVER
+# RESET ROUND
+# ============================================================
+
+def reset_round(room):
+
+    room["choice1"] = None
+    room["choice2"] = None
+
+
+# ============================================================
+# RESET MATCH
+# ============================================================
+
+def reset_match(room):
+
+    room["score1"] = 0
+    room["score2"] = 0
+
+    room["choice1"] = None
+    room["choice2"] = None
+
+    room["match_over"] = False
+
+
+# ============================================================
+# WEBSOCKET HANDLER
 # ============================================================
 
 async def handler(websocket):
@@ -86,17 +111,19 @@ async def handler(websocket):
 
     print("WebSocket client connected")
 
-
     try:
 
         async for message in websocket:
 
-            print("Received:", message)
+            print(
+                "Received:",
+                message
+            )
 
 
-            # ==================================================
+            # ====================================================
             # CREATE ROOM
-            # ==================================================
+            # ====================================================
 
             if message == "CREATE":
 
@@ -121,7 +148,6 @@ async def handler(websocket):
                     "mode": None,
 
                     "match_over": False
-
                 }
 
                 player_number = 1
@@ -135,9 +161,9 @@ async def handler(websocket):
                 )
 
 
-            # ==================================================
+            # ====================================================
             # JOIN ROOM
-            # ==================================================
+            # ====================================================
 
             elif message.startswith("JOIN:"):
 
@@ -175,26 +201,46 @@ async def handler(websocket):
 
                 player_number = 2
 
+
                 await websocket.send(
                     "JOINED"
                 )
 
-                await room["player1"].send(
-                    "PLAYER2_JOINED"
-                )
+
+                if room["player1"] is not None:
+
+                    try:
+
+                        await room["player1"].send(
+                            "PLAYER2_JOINED"
+                        )
+
+                    except:
+
+                        pass
+
 
                 print(
-                    f"Player joined room: {room_id}"
+                    f"Player 2 joined room: {room_id}"
                 )
 
 
-            # ==================================================
-            # MATCH MODE
-            # ==================================================
+            # ====================================================
+            # SELECT MATCH MODE
+            # ====================================================
 
             elif message.startswith("MODE:"):
 
                 if room_id is None:
+
+                    continue
+
+
+                room = rooms.get(
+                    room_id
+                )
+
+                if room is None:
 
                     continue
 
@@ -204,17 +250,18 @@ async def handler(websocket):
                     1
                 )[1]
 
-                room = rooms.get(
-                    room_id
-                )
 
-
-                if room is None:
+                if mode not in [
+                    "BO3",
+                    "BO5",
+                    "UNLIMITED"
+                ]:
 
                     continue
 
 
                 room["mode"] = mode
+
 
                 if mode == "BO3":
 
@@ -229,11 +276,7 @@ async def handler(websocket):
                     room["target"] = None
 
 
-                room["score1"] = 0
-                room["score2"] = 0
-                room["choice1"] = None
-                room["choice2"] = None
-                room["match_over"] = False
+                reset_match(room)
 
 
                 print(
@@ -247,9 +290,9 @@ async def handler(websocket):
                 )
 
 
-            # ==================================================
+            # ====================================================
             # PLAYER CHOICE
-            # ==================================================
+            # ====================================================
 
             elif message.startswith("CHOICE:"):
 
@@ -262,13 +305,25 @@ async def handler(websocket):
                     room_id
                 )
 
-
                 if room is None:
 
                     continue
 
 
+                if room["player2"] is None:
+
+                    await websocket.send(
+                        "ERROR:WAITING_FOR_PLAYER"
+                    )
+
+                    continue
+
+
                 if room["match_over"]:
+
+                    await websocket.send(
+                        "ERROR:MATCH_OVER"
+                    )
 
                     continue
 
@@ -279,9 +334,22 @@ async def handler(websocket):
                 )[1]
 
 
-                # ----------------------------------------------
-                # PLAYER 1
-                # ----------------------------------------------
+                if choice not in [
+                    "Stone",
+                    "Paper",
+                    "Scissors"
+                ]:
+
+                    await websocket.send(
+                        "ERROR:INVALID_CHOICE"
+                    )
+
+                    continue
+
+
+                # ================================================
+                # PLAYER 1 CHOICE
+                # ================================================
 
                 if player_number == 1:
 
@@ -293,14 +361,15 @@ async def handler(websocket):
 
                         continue
 
+
                     room["choice1"] = choice
 
 
-                # ----------------------------------------------
-                # PLAYER 2
-                # ----------------------------------------------
+                # ================================================
+                # PLAYER 2 CHOICE
+                # ================================================
 
-                else:
+                elif player_number == 2:
 
                     if room["choice2"] is not None:
 
@@ -309,6 +378,7 @@ async def handler(websocket):
                         )
 
                         continue
+
 
                     room["choice2"] = choice
 
@@ -319,9 +389,9 @@ async def handler(websocket):
                 )
 
 
-                # ----------------------------------------------
-                # WAIT FOR OTHER PLAYER
-                # ----------------------------------------------
+                # ================================================
+                # WAIT FOR BOTH PLAYERS
+                # ================================================
 
                 if (
                     room["choice1"] is None
@@ -332,9 +402,9 @@ async def handler(websocket):
                     continue
 
 
-                # ----------------------------------------------
+                # ================================================
                 # BOTH CHOICES RECEIVED
-                # ----------------------------------------------
+                # ================================================
 
                 choice1 = room["choice1"]
 
@@ -347,23 +417,26 @@ async def handler(websocket):
                 )
 
 
+                # ================================================
+                # UPDATE SCORE
+                # ================================================
+
                 if result == "Player1":
 
                     room["score1"] += 1
-
 
                 elif result == "Player2":
 
                     room["score2"] += 1
 
 
-                # ----------------------------------------------
-                # CHECK MATCH OVER
-                # ----------------------------------------------
+                # ================================================
+                # CHECK MATCH END
+                # ================================================
 
                 target = room["target"]
 
-                match_over = False
+                match_over_now = False
 
 
                 if target is not None:
@@ -374,30 +447,23 @@ async def handler(websocket):
                         room["score2"] >= target
                     ):
 
-                        match_over = True
-
                         room["match_over"] = True
 
-
-                score1 = room["score1"]
-
-                score2 = room["score2"]
+                        match_over_now = True
 
 
-                # ----------------------------------------------
+                # ================================================
                 # SEND RESULT
-                # ----------------------------------------------
+                # ================================================
 
                 result_message = (
-
                     f"RESULT:"
                     f"{choice1}:"
                     f"{choice2}:"
                     f"{result}:"
-                    f"{score1}:"
-                    f"{score2}:"
-                    f"{match_over}"
-
+                    f"{room['score1']}:"
+                    f"{room['score2']}:"
+                    f"{match_over_now}"
                 )
 
 
@@ -409,22 +475,21 @@ async def handler(websocket):
 
                 print(
                     f"Room {room_id}: "
-                    f"{choice1} vs {choice2}"
+                    f"{choice1} vs {choice2} "
+                    f"-> {result}"
                 )
 
 
-                # ----------------------------------------------
-                # RESET ROUND
-                # ----------------------------------------------
+                # ================================================
+                # CLEAR ROUND
+                # ================================================
 
-                room["choice1"] = None
-
-                room["choice2"] = None
+                reset_round(room)
 
 
-            # ==================================================
+            # ====================================================
             # REMATCH
-            # ==================================================
+            # ====================================================
 
             elif message == "REMATCH":
 
@@ -437,21 +502,21 @@ async def handler(websocket):
                     room_id
                 )
 
-
                 if room is None:
 
                     continue
 
 
-                room["score1"] = 0
+                if (
+                    room["player1"] is None
+                    or
+                    room["player2"] is None
+                ):
 
-                room["score2"] = 0
+                    continue
 
-                room["choice1"] = None
 
-                room["choice2"] = None
-
-                room["match_over"] = False
+                reset_match(room)
 
 
                 print(
@@ -466,7 +531,7 @@ async def handler(websocket):
 
 
     # ============================================================
-    # DISCONNECT
+    # CONNECTION CLOSED
     # ============================================================
 
     except websockets.exceptions.ConnectionClosed:
@@ -483,6 +548,10 @@ async def handler(websocket):
             e
         )
 
+
+    # ============================================================
+    # CLEANUP
+    # ============================================================
 
     finally:
 
@@ -503,9 +572,6 @@ async def handler(websocket):
 
                     room["player2"] = None
 
-
-                # Tell remaining player
-                # that opponent disconnected
 
                 remaining_player = None
 
@@ -546,7 +612,7 @@ async def handler(websocket):
 
 
 # ============================================================
-# START SERVER
+# SERVER
 # ============================================================
 
 async def main():
@@ -592,7 +658,7 @@ async def main():
 
 
 # ============================================================
-# RUN
+# START
 # ============================================================
 
 if __name__ == "__main__":
