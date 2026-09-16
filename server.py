@@ -12,8 +12,12 @@ rooms = {}
 # =========================
 
 def create_room_id():
+
     while True:
-        room_id = str(random.randint(100000, 999999))
+
+        room_id = str(
+            random.randint(100000, 999999)
+        )
 
         if room_id not in rooms:
             return room_id
@@ -35,6 +39,7 @@ def get_result(choice1, choice2):
         or
         (choice1 == "Scissors" and choice2 == "Paper")
     ):
+
         return "Player1"
 
     return "Player2"
@@ -57,6 +62,7 @@ async def send_to_players(room, message):
 
             try:
                 await player.send(message)
+
             except:
                 pass
 
@@ -76,6 +82,28 @@ async def send_turn(room):
 
 
 # =========================
+# NEXT ROUND
+# =========================
+
+async def start_next_round(room):
+
+    # Small delay so players can actually see
+    # the result of the previous round.
+
+    await asyncio.sleep(2)
+
+    if room["match_over"]:
+        return
+
+    room["round_number"] += 1
+
+    room["choice1"] = None
+    room["choice2"] = None
+
+    await send_turn(room)
+
+
+# =========================
 # HANDLE MESSAGE
 # =========================
 
@@ -90,6 +118,7 @@ async def handle_message(websocket, message):
         room_id = create_room_id()
 
         rooms[room_id] = {
+
             "player1": websocket,
             "player2": None,
 
@@ -104,12 +133,11 @@ async def handle_message(websocket, message):
 
             "match_over": False,
 
-            # Random first player
+            # First round randomly chooses starter
             "starter": random.choice([1, 2]),
 
             "round_number": 1,
 
-            # Rematch system
             "rematch_requested_by": None
         }
 
@@ -154,7 +182,9 @@ async def handle_message(websocket, message):
         websocket.room_id = room_id
         websocket.player_number = 2
 
-        await websocket.send("JOINED")
+        await websocket.send(
+            "JOINED"
+        )
 
         await room["player1"].send(
             "PLAYER2_JOINED"
@@ -204,9 +234,12 @@ async def handle_message(websocket, message):
         room["score2"] = 0
 
         room["match_over"] = False
+
         room["round_number"] = 1
 
-        # Random starter for a new match
+        # Every new match starts with
+        # a random starter.
+
         room["starter"] = random.choice([1, 2])
 
         room["rematch_requested_by"] = None
@@ -238,7 +271,6 @@ async def handle_message(websocket, message):
 
         room = rooms[room_id]
 
-        # Player 2 has not joined yet
         if room["player2"] is None:
 
             await websocket.send(
@@ -247,7 +279,6 @@ async def handle_message(websocket, message):
 
             return
 
-        # Match already finished
         if room["match_over"]:
 
             await websocket.send(
@@ -261,7 +292,6 @@ async def handle_message(websocket, message):
             1
         )[1]
 
-        # Validate choice
         if choice not in [
             "Stone",
             "Paper",
@@ -278,6 +308,27 @@ async def handle_message(websocket, message):
 
 
         # =========================
+        # STARTER CHOOSES FIRST
+        # =========================
+
+        if player != room["starter"]:
+
+            first_choice = (
+                room["choice1"]
+                if room["starter"] == 1
+                else room["choice2"]
+            )
+
+            if first_choice is None:
+
+                await websocket.send(
+                    "WAITING_FOR_TURN"
+                )
+
+                return
+
+
+        # =========================
         # PREVENT DOUBLE CHOICE
         # =========================
 
@@ -291,6 +342,8 @@ async def handle_message(websocket, message):
 
                 return
 
+            room["choice1"] = choice
+
         else:
 
             if room["choice2"] is not None:
@@ -301,44 +354,11 @@ async def handle_message(websocket, message):
 
                 return
 
-
-        # =========================
-        # STARTER MUST CHOOSE FIRST
-        # =========================
-
-        # If nobody has chosen yet,
-        # only the starter can choose.
-
-        if (
-            room["choice1"] is None
-            and
-            room["choice2"] is None
-        ):
-
-            if player != room["starter"]:
-
-                await websocket.send(
-                    "WAITING_FOR_TURN"
-                )
-
-                return
-
-
-        # =========================
-        # STORE CHOICE
-        # =========================
-
-        if player == 1:
-
-            room["choice1"] = choice
-
-        else:
-
             room["choice2"] = choice
 
 
         # =========================
-        # ONLY ONE CHOICE RECEIVED
+        # STARTER CHOSE
         # =========================
 
         if (
@@ -347,27 +367,23 @@ async def handle_message(websocket, message):
             room["choice2"] is None
         ):
 
-            # The player who has NOT chosen
-            # gets permission to choose.
+            # Tell the other player that
+            # it is now their turn.
 
             other_player = (
-                2 if player == 1 else 1
-            )
-
-            other_socket = (
                 room["player2"]
-                if other_player == 2
+                if player == 1
                 else room["player1"]
             )
 
-            if other_socket is not None:
+            if other_player is not None:
 
-                await other_socket.send(
+                await other_player.send(
                     "YOUR_TURN"
                 )
 
-            # Tell the player who already chose
-            # to wait.
+            # Tell starter their choice
+            # remains hidden.
 
             await websocket.send(
                 "WAITING_FOR_OPPONENT_CHOICE"
@@ -418,6 +434,7 @@ async def handle_message(websocket, message):
 
                 match_over = True
 
+
         room["match_over"] = match_over
 
 
@@ -457,37 +474,27 @@ async def handle_message(websocket, message):
 
         if result == "Player1":
 
-            # Player 1 won the round
-            # so Player 1 starts next.
-
+            # Round winner starts next round
             room["starter"] = 1
 
         elif result == "Player2":
 
-            # Player 2 won the round
-            # so Player 2 starts next.
-
+            # Round winner starts next round
             room["starter"] = 2
 
         else:
 
-            # Draw
-            # Same player starts again.
-
+            # Draw = same starter
             pass
 
 
-        room["round_number"] += 1
-
-        room["choice1"] = None
-        room["choice2"] = None
-
-
         # =========================
-        # NEXT ROUND
+        # START NEXT ROUND
         # =========================
 
-        await send_turn(room)
+        asyncio.create_task(
+            start_next_round(room)
+        )
 
         return
 
@@ -511,7 +518,6 @@ async def handle_message(websocket, message):
 
         player = websocket.player_number
 
-        # Already requested
         if room["rematch_requested_by"] == player:
 
             await websocket.send(
@@ -532,12 +538,10 @@ async def handle_message(websocket, message):
             else room["player1"]
         )
 
-        # Tell requester
         await websocket.send(
             "REMATCH_WAITING"
         )
 
-        # Ask opponent
         if other_socket is not None:
 
             await other_socket.send(
@@ -567,7 +571,6 @@ async def handle_message(websocket, message):
         if room["rematch_requested_by"] is None:
             return
 
-        # Only opponent can accept
         if (
             websocket.player_number
             ==
@@ -591,7 +594,6 @@ async def handle_message(websocket, message):
 
         room["round_number"] = 1
 
-        # Random starter for rematch
         room["starter"] = random.choice([1, 2])
 
         room["rematch_requested_by"] = None
@@ -631,7 +633,6 @@ async def handle_message(websocket, message):
         if requester is None:
             return
 
-        # Only opponent can decline
         if (
             websocket.player_number
             ==
@@ -640,7 +641,6 @@ async def handle_message(websocket, message):
 
             return
 
-
         requester_socket = (
             room["player1"]
             if requester == 1
@@ -648,7 +648,6 @@ async def handle_message(websocket, message):
         )
 
         room["rematch_requested_by"] = None
-
 
         if requester_socket is not None:
 
@@ -669,7 +668,9 @@ async def handle_message(websocket, message):
 
 async def client_connected(websocket):
 
-    print("WebSocket client connected")
+    print(
+        "WebSocket client connected"
+    )
 
     websocket.room_id = None
     websocket.player_number = None
@@ -685,11 +686,16 @@ async def client_connected(websocket):
 
     except websockets.exceptions.ConnectionClosed:
 
-        print("Client disconnected")
+        print(
+            "Client disconnected"
+        )
 
     except Exception as e:
 
-        print("Connection error:", e)
+        print(
+            "Connection error:",
+            e
+        )
 
     finally:
 
@@ -711,12 +717,10 @@ async def client_connected(websocket):
 
                 room["player2"] = None
 
-
             await send_to_players(
                 room,
                 "PLAYER_DISCONNECTED"
             )
-
 
             if (
                 room["player1"] is None
